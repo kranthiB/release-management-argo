@@ -30,6 +30,7 @@ APP_INFO = Gauge(
     ['version', 'environment']
 )
 
+#Create app instance of FastAPI
 app = FastAPI(
     title="Enterprise Demo App",
     version="1.0.0",
