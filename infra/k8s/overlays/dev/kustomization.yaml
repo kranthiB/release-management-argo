@@ -8,5 +8,5 @@ patchesStrategicMerge:
 - patch-configmap.yaml
 - rollout-patch.yaml
 images:
-- name: ghcr.io/prashantsharma18/enterprise-demo
+- name: ghcr.io/kranthib/enterprise-demo
   newTag: 03da985be00e758741e86be27744ab2829c13a5d

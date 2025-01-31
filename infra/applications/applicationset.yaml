@@ -18,7 +18,7 @@ spec:
     spec:
       project: default
       source:
-        repoURL: https://github.com/prashantsharma18/enterprise-demo.git
+        repoURL: https://github.com/kranthiB/enterprise-demo.git
         targetRevision: HEAD
         path: infra/k8s/overlays/{{environment}}
       destination:

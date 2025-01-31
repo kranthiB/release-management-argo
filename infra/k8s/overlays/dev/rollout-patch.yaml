@@ -7,7 +7,7 @@ spec:
     spec:
       containers:
       - name: enterprise-demo
-        image: ghcr.io/prashantsharma18/enterprise-demo:latest  # This will be updated automatically
+        image: ghcr.io/kranthib/enterprise-demo:latest  # This will be updated automatically
   strategy:
     blueGreen:
       autoPromotionEnabled: true  # Auto-promote in dev environment
