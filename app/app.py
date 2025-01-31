@@ -38,6 +38,7 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
+#Start app with version 1.0.0
 @app.on_event("startup")
 async def startup_event():
     # Set application status to up
