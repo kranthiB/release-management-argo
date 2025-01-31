@@ -12,7 +12,7 @@ spec:
       description: "The image tag to promote"
     - name: git-repo
       description: "Git repository URL"
-      default: "https://github.com/kranthiB/enterprise-demo.git"
+      default: "https://github.com/kranthiB/release-management-argo.git"
     - name: git-branch
       description: "Git branch"
       default: "main"
@@ -82,7 +82,7 @@ spec:
         git config --global user.name "Argo Workflow"
 
         # Clone repository
-        REPO_URL="git@github.com:kranthiB/enterprise-demo.git"
+        REPO_URL="git@github.com:kranthiB/release-management-argo.git"
         git clone --depth 1 -b {{workflow.parameters.git-branch}} "${REPO_URL}" repo
         
         cd repo/infra/k8s/overlays/{{inputs.parameters.env}}
