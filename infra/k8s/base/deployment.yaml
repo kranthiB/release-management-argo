@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: enterprise-demo
+spec:
+  selector:
+    matchLabels:
+      app: enterprise-demo
+  template:
+    metadata:
+      labels:
+        app: enterprise-demo
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: enterprise-demo
+        image: ghcr.io/prashantsharma18/enterprise-demo:latest
+        ports:
+        - containerPort: 8000
+        envFrom:
+        - configMapRef:
+            name: enterprise-demo-config
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+       

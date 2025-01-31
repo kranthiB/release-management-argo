@@ -1,0 +1,255 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: promotion-workflow
+  namespace: argo
+spec:
+  serviceAccountName: promotion-workflow
+  entrypoint: promote
+  arguments:
+    parameters:
+    - name: image-tag
+      description: "The image tag to promote"
+    - name: git-repo
+      description: "Git repository URL"
+      default: "https://github.com/prashantsharma18/enterprise-demo.git"
+    - name: git-branch
+      description: "Git branch"
+      default: "main"
+  
+  templates:
+  - name: promote
+    dag:
+      tasks:
+      - name: deploy-to-dev
+        template: update-manifest
+        arguments:
+          parameters:
+          - name: env
+            value: dev
+          - name: image-tag
+            value: "{{workflow.parameters.image-tag}}"
+      
+      - name: sync-argo-cd
+        dependencies: [deploy-to-dev]
+        template: sync-argo-cd
+        arguments:
+          parameters:
+          - name: env
+            value: dev
+
+      - name: manual-rollback-approval
+        dependencies: [sync-argo-cd]
+        template: approve-rollback
+      
+      - name: manual-rollback
+        dependencies: [manual-rollback-approval]
+        template: rollback-rollout
+        arguments:
+          parameters:
+          - name: env
+            value: dev
+
+  - name: update-manifest
+    inputs:
+      parameters:
+      - name: env
+      - name: image-tag
+    script:
+      image: bitnami/git:latest
+      command: [bash]
+      env:
+        - name: GIT_SSH_COMMAND
+          value: "ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
+      volumeMounts:
+        - name: ssh-key
+          mountPath: /ssh-secrets
+          readOnly: true
+        - name: workspace
+          mountPath: /root/.ssh
+      source: |
+        #!/bin/bash
+        set -ex
+        
+        # Create SSH directory with correct permissions
+        mkdir -p /root/.ssh
+        cp /ssh-secrets/ssh-privatekey /root/.ssh/id_rsa
+        chmod 700 /root/.ssh
+        chmod 400 /root/.ssh/id_rsa
+        
+        # Configure Git
+        git config --global user.email "argo@workflow.local"
+        git config --global user.name "Argo Workflow"
+
+        # Clone repository
+        REPO_URL="git@github.com:prashantsharma18/enterprise-demo.git"
+        git clone --depth 1 -b {{workflow.parameters.git-branch}} "${REPO_URL}" repo
+        
+        cd repo/infra/k8s/overlays/{{inputs.parameters.env}}
+        
+        # Update manifest
+        sed -i "s|newTag:.*|newTag: {{inputs.parameters.image-tag}}|g" kustomization.yaml
+        
+        # Commit and push changes
+        git add kustomization.yaml
+        git commit -m "Update {{inputs.parameters.env}} to {{inputs.parameters.image-tag}}"
+        git push origin {{workflow.parameters.git-branch}}
+    volumes:
+    - name: ssh-key
+      secret:
+        secretName: git-ssh-key
+        defaultMode: 0400
+    - name: workspace
+      emptyDir: {}
+
+  - name: sync-argo-cd
+    inputs:
+      parameters:
+      - name: env
+    script:
+      image: alpine:3.18
+      command: [sh]  # Changed from bash to sh
+      env:
+        - name: ARGOCD_SERVER
+          value: "argocd-server.argocd.svc.cluster.local"
+        - name: ARGOCD_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: argocd-auth-creds
+              key: username
+        - name: ARGOCD_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: argocd-auth-creds
+              key: password
+      source: |
+        set -e
+        
+        # Install required tools
+        apk add --no-cache curl bash git
+
+        # Install ArgoCD CLI
+        curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+        chmod +x /usr/local/bin/argocd
+        
+        echo "Logging into ArgoCD..."
+        argocd login $ARGOCD_SERVER --username $ARGOCD_USERNAME --password $ARGOCD_PASSWORD --insecure
+        
+        argocd app sync enterprise-demo-{{inputs.parameters.env}}
+        
+        echo "Waiting for ArgoCD sync..."
+        argocd app wait enterprise-demo-{{inputs.parameters.env}} --health --timeout 300
+
+
+  - name: rollback-rollout
+    inputs:
+      parameters:
+      - name: env
+    script:
+      image: alpine:3.18
+      command: [sh]
+      source: |
+        set -e
+
+        # Install required tools
+        apk add --no-cache curl bash git
+
+        # Install kubectl
+        curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+        chmod +x kubectl
+        mv kubectl /usr/local/bin/
+
+        # Install argo rollouts plugin
+        curl -sL https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64 -o /usr/local/bin/kubectl-argo-rollouts
+        chmod +x /usr/local/bin/kubectl-argo-rollouts
+        
+        echo "Rolling back to previous version..."
+        kubectl argo rollouts undo enterprise-demo -n {{inputs.parameters.env}} --to-revision=0
+
+        echo "Rollback complete!"
+
+  - name: approve-rollback
+    suspend: {}
+
+# ConfigMap for workflow configuration
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: promotion-config
+  namespace: argo
+data:
+  verify-timeout: "300"
+  success-rate-threshold: "0.95"
+  health-check-endpoint: "/health"
+
+# Create a ServiceAccount and RBAC for the workflow
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: promotion-workflow
+  namespace: argo
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: promotion-workflow-role
+rules:
+- apiGroups: ["argoproj.io"]
+  resources: ["rollouts", "analysisruns", "experiments"]
+  verbs: ["get", "list", "watch", "update", "patch"]
+- apiGroups: ["argoproj.io"]
+  resources: ["rollouts/status"]  # Grant access to the status subresource
+  verbs: ["patch"]  # Allow patching status
+- apiGroups: [""]
+  resources: ["services", "pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: promotion-workflow-binding
+subjects:
+- kind: ServiceAccount
+  name: promotion-workflow
+  namespace: argo
+roleRef:
+  kind: ClusterRole
+  name: promotion-workflow-role
+  apiGroup: rbac.authorization.k8s.io
+
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: workflow-role
+  namespace: argo
+rules:
+- apiGroups: ["argoproj.io"]
+  resources: [workflows, workflowtasksets, workflowtaskresults, workflowtemplates]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: workflow-rolebinding
+  namespace: argo
+subjects:
+- kind: ServiceAccount
+  name: promotion-workflow
+  namespace: argo
+roleRef:
+  kind: Role
+  name: workflow-role
+  apiGroup: rbac.authorization.k8s.io

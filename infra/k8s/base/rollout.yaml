@@ -1,0 +1,36 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: enterprise-demo
+spec:
+  replicas: 3
+  strategy:
+    blueGreen:
+      activeService: enterprise-demo-active
+      previewService: enterprise-demo-preview
+      autoPromotionEnabled: false
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: enterprise-demo
+  template:
+    metadata:
+      labels:
+        app: enterprise-demo
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: enterprise-demo
+        image: ghcr.io/prashantsharma18/enterprise-demo:latest
+        ports:
+        - containerPort: 8000
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
