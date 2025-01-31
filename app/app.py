@@ -46,6 +46,7 @@ async def startup_event():
     # Set application info
     APP_INFO.labels(version="1.0.0", environment="production").set(1)
 
+#Exposed HTTP
 @app.middleware("http")
 async def metrics_middleware(request: Request, call_next):
     start_time = time.time()
